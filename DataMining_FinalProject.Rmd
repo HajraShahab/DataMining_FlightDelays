@@ -1,0 +1,531 @@
+---
+  title: "FinalProject_HajraShahab_MohammadHarrisMansur"
+subtitle: "95-791 Data Mining"
+author: "Hajra Shahab and Mohammad Harris Mansur"
+output:
+  html_document:
+  toc: true
+toc_depth: 4
+theme: cerulean
+highlight: textmate
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2) # graphics library
+library(MASS)    # contains data sets, including Boston
+library(ISLR)    # contains code and data from the textbook
+library(knitr)   # contains kable() function
+library(gridExtra) #Miscellaneous Functions for "Grid" Graphics
+library(dplyr)  # contains useful functions for data manipulation
+library(jtools) # Analysis and Presentation of Social Scientific Data
+library(magrittr) # A Forward-Pipe Operator for R: %>%
+library(kableExtra) # For constructing complex tables
+library(ggpubr) # 'ggplot2' Based Publication Ready Plots
+library(glmnet)
+library(leaps)  # needed for regsubsets
+library(boot)   # needed for cv.glm
+library(gridExtra)
+library(ggcorrplot)
+library(GGally)
+library(rpart)
+library(randomForest)
+library(pROC)
+library(gbm)
+library(factoextra)
+
+options(scipen = 4)  # Suppresses scientific notation
+
+```
+
+### 1. Exploratory analysis
+
+```{r}
+all_PIT_2006 <- read.csv(file = "all_PIT_2006.csv", header = TRUE)
+head(all_PIT_2006)
+
+all_PIT_201803_201902 <- read.csv(file = "all_PIT_201803_201902.csv", header = TRUE)
+head(all_PIT_201803_201902)
+
+```
+## 1.1 Checking for NA
+```{r}
+totalNA <- sum(is.na(all_PIT_2006))
+all_PIT_2006_clean <- na.omit(all_PIT_2006) # Remove NA rows
+# sum(is.na(all_PIT_2006_clean)) # To check no NA values remain
+
+head(all_PIT_2006_clean)
+quarterVals <- unique(all_PIT_2006_clean$Quarter) # 1,2,3,4. To check if there were any values that should not have been there like 0 or 5,6,7..
+monthVals <- unique(all_PIT_2006_clean$Month) # Only values from 1 to 12
+DayOfMonth <- unique(all_PIT_2006_clean$DayofMonth) # Only values from 1 to 31
+DayOfWeek <- unique(all_PIT_2006_clean$DayOfWeek) # Only values from 1 to 7
+
+```
+
+## Interesting insights in data
+
+```{r}
+# head(all_PIT_2006_clean)
+# Number of delays according to carrier
+# all_PIT_2006_clean$FlightDate < "01/06/2003" # checked all data is after June, 2006 to check for Cause of Delay
+
+ggplot(data = all_PIT_2006_clean,
+       aes(x = Carrier)) +
+  geom_histogram(stat = "count") # To check each carrier's flights
+
+# Normalize data and plot proportions
+
+delaysPerCarrier <- all_PIT_2006_clean %>%
+  group_by(Carrier) %>%
+  summarize(num.obs = n(),
+            carDelay = sum(CarrierDelay > 0))
+
+ggplot(data = delaysPerCarrier,
+       aes(x = Carrier,
+           y = carDelay)) +
+  geom_bar(stat = "identity")
+
+# But some Carriers might have fewer flights so we should actually compare the proportion of total flights that got delayed
+
+delaysPerCarrier <- all_PIT_2006_clean %>%
+  group_by(Carrier) %>%
+  summarize(num.obs = n(),
+            carDelayProp = sum(CarrierDelay > 0) / n())
+
+ggplot(data = delaysPerCarrier,
+       aes(x = Carrier,
+           y = carDelayProp)) +
+  geom_bar(stat = "identity")
+
+
+
+
+```
+
+
+```{r}
+
+# Checking if delays had to do anything with the Origin City (SHOULD CHECK WITH DESTINATION CITY AS WELL)
+
+OriginCity.CarrierDelay <- all_PIT_2006_clean %>%
+  group_by(OriginCityName, Carrier) %>%
+  summarize(total = n(),
+            delayedFlightNum = sum(CarrierDelay > 0),
+            delayedFlightProp = sum(CarrierDelay > 0) / n())
+
+OriginCity.CarrierDelay %>%
+  group_by(OriginCityName) %>%
+  summarize(totFlightsInCity = sum(total),
+            totDelayedFlights = sum(delayedFlightNum),
+            proportion = totDelayedFlights / totFlightsInCity) %>%
+  ggplot(aes(x = OriginCityName,
+             y = proportion)) +
+  geom_histogram(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5), legend.position = 'none')
+
+
+```
+
+```{r}
+# Checking if delays (Carrier) had to do anything with the Month
+OriginCity.MonthDelay <- all_PIT_2006_clean %>%
+  group_by(Month, Carrier) %>%
+  summarize(total = n(),
+            delayedFlightNum = sum(CarrierDelay > 0),
+            delayedFlightProp = sum(CarrierDelay > 0) / n())
+
+OriginCity.MonthDelay %>%
+  group_by(Month) %>%
+  summarize(totalFlightsInMonth = sum(total),
+            totalDelaysInMonth = sum(delayedFlightNum),
+            propInMonth = totalDelaysInMonth / totalFlightsInMonth) %>%
+  ggplot(aes(x = as.factor(Month),
+             y = propInMonth)) +
+  geom_histogram(stat = "identity")
+
+
+```
+
+```{r}
+# Checking if delays (weather) had to do anything with the Month
+WeatherDelay <- all_PIT_2006_clean %>%
+  group_by(Month) %>%
+  summarize(total = n(),
+            delayedFlightNum = sum(WeatherDelay > 0),
+            delayedFlightProp = sum(WeatherDelay > 0) / n())
+
+WeatherDelay %>%
+  group_by(Month) %>%
+  summarize(totalFlightsInMonth = sum(total),
+            totalDelaysInMonth = sum(delayedFlightNum),
+            propInMonth = totalDelaysInMonth / totalFlightsInMonth) %>%
+  ggplot(aes(x = as.factor(Month),
+             y = propInMonth)) +
+  geom_histogram(stat = "identity")
+
+
+```
+
+```{r}
+# Variable analysis
+head(all_PIT_2006_clean)
+ggplot(data = all_PIT_2006_clean,
+       aes(x = ArrTime,
+           y = ArrDelay)) +
+  geom_point(stat = "identity")
+
+```
+
+
+
+```{r}
+# Available data features that are useful in predicting
+# head(all_PIT_2006_clean)
+
+# all_PIT_2006_clean$CarrierDelayFactor <- as.factor(ifelse(all_PIT_2006_clean$CarrierDelay > 0, "Delay", "On-time"))
+head(all_PIT_2006_clean)
+# lm.all <- lm(CarrierDelayFactor ~ ., data = all_PIT_2006_clean)
+# summary(lm.all)
+
+```
+
+```{r}
+# We can see that the number of delays are mostly present at less than 50.
+ggplot(data = all_PIT_2006_clean, aes(ArrDelay)) +
+  geom_density(fill = "green")
+# This is to check the distribution of CarrierDelays
+ggplot(data = all_PIT_2006_clean, aes(CarrierDelay)) +
+  geom_density(fill = "lightblue")
+
+```
+
+
+```{r}
+head(all_PIT_2006_clean)
+delay.carrier <- all_PIT_2006_clean %>%
+  group_by(Carrier) %>%
+  summarize(count = n(),
+            totalArrDelay = sum(ArrDelay > 0),
+            totalDepDelay = sum(DepDelay > 0),
+            numCarrierDelays = sum(CarrierDelay > 0),
+            numWeatherDelays = sum(WeatherDelay > 0),
+            numNASDelays = sum(NASDelay > 0),
+            numSecurityDelays = sum(SecurityDelay > 0),
+            numLateAircraftDelays = sum(LateAircraftDelay > 0))
+
+# proportion of delays of each type out of the total number of flights that got delayed (by greater than 0 minutes, by carrier etc.) Can use different infographics to display this information
+
+ggplot(data = delay.carrier,
+       aes(x = Carrier, y = totalArrDelay, fill = as.factor(numLateAircraftDelays))) +
+  geom_histogram(stat = "identity")
+
+ggplot(data = delay.carrier,
+       aes(x = as.factor(Carrier), y = numCarrierDelays/totalArrDelay)) + 
+  geom_histogram(stat = "identity")
+
+
+ggplot(data = all_PIT_2006_clean,
+       aes(x = ArrDelay, y = WheelsOn)) +
+  geom_point(stat = "identity")
+
+```
+
+
+```{r}
+# Lab 1 imp stuff
+ccd_plot<-ggplot(all_PIT_2006_clean, aes(Carrier,CarrierDelay)) +
+  geom_point(size=1,colour="darkgreen") +
+  theme_bw() 
+
+ccd_plot # step function
+
+head(all_PIT_2006_clean)
+all_PIT_2006_clean_lm <- all_PIT_2006_clean %>%
+  mutate_if(is.character, as.factor) # convert chr to factor
+
+# pred.vars.for.Carrier <- all_PIT_2006_clean_lm[,c(-54:-58)]
+# pred.vars.for.Carrier <- all_PIT_2006_clean_lm[,c(-51)]
+
+# lm.Carrier <- lm(CarrierDelay ~ ., data = pred.vars.for.Carrier)
+# summary(lm.Carrier)
+
+```
+
+
+```{r}
+# Checking which variables are important by plotting graphs and checking if there are any trends
+
+head(all_PIT_2006_clean)
+ggplot(all_PIT_2006_clean,
+       aes(x = as.factor(Quarter), 
+           y = ArrDelay)) +
+  geom_boxplot()
+# Boxplot above shows that there is no statistically significant different between the amount of delays (in minutes) for the different quarters. We can see this because the boxplots are all overlapping with each other. Lots of outliers though (how do we interpret them?)
+
+ggplot(all_PIT_2006_clean,
+       aes(x = as.factor(Month), 
+           y = ArrDelay)) +
+  geom_boxplot()
+# Month also does not seem to have a significantly significant difference across the year.
+
+ggplot(all_PIT_2006_clean,
+       aes(x = as.factor(Month), 
+           y = WeatherDelay)) +
+  geom_boxplot()
+
+# Month and WeatherDelay also seem to not be related (in a statistically significant way)
+
+ggplot(all_PIT_2006_clean,
+       aes(x = ArrDelay, 
+           y = CarrierDelay)) +
+  geom_point()
+# ArrDelay and CarrierDelay clearly seem to be correlated. Theres an upward trend that we can see
+
+
+
+
+```
+
+```{r}
+# dividing data into training and testing datasets
+# Randomly select 20% of the data to be held out for model validation
+
+test.indexes <- sample(1:nrow(all_PIT_2006_clean), 
+                       round(0.2 * nrow(all_PIT_2006_clean)))
+train.indexes <- setdiff(1:nrow(all_PIT_2006_clean), test.indexes)
+
+training.data.pit <- all_PIT_2006_clean[train.indexes,]
+testing.data.pit <- all_PIT_2006_clean[test.indexes,]
+
+```
+
+
+
+```{r}
+# Second question in description
+
+
+
+# NEED to repeat for all possible delays
+# Dataset with ArrDelay and other possible predictor variables
+ArrDelayData = training.data.pit[,c(2, 3, 6, 10, 13, 15, 20, 44, 46,
+                                    47, 48, 49)]
+
+# Variable selection
+glm_lexp= glm(ArrDelay ~ .,data = ArrDelayData)
+kable(coef(summary(glm_lexp)), digits = c(1,0,1,3))
+statistically.significant <- coef(summary(glm_lexp))[,"Pr(>|t|)"] < 0.05
+statistically.significant
+
+```
+
+```{r}
+# Best subset approach
+# ggpairs(ArrDelayData)
+flights.subset <- regsubsets(ArrDelay ~ .,
+                             data = ArrDelayData,
+                             nbest = 1,    # 1 best model for each number of predictors
+                             nvmax = 12,    # NULL for no limit on number of variables
+                             method = "exhaustive", really.big = TRUE)
+
+summary(flights.subset)
+
+nvmax = 12
+flights.subset_bestmodels <- list()
+#Iterate to get the best model at each number of coeficients
+#Remember that we limited our nvmax to 5!
+for(i in 1:nvmax) {
+  flights.subset_bestmodels[[i]] <- c(coef(flights.subset, i))
+}
+flights.subset_bestmodels
+
+flights.subset_fs <- regsubsets(ArrDelay ~ .,
+                                data = ArrDelayData,
+                                nbest = 1,    # 1 best model for each number of predictors
+                                nvmax = NULL,    # NULL for no limit on number of variables
+                                method = "forward", really.big = TRUE)
+
+
+flights.summary<-summary(flights.subset_fs)
+num_variables<-seq(1,length(flights.summary$rss))
+
+plot_RSS<-ggplot(data = data.frame(flights.summary$rss),
+                 aes(x=num_variables,y=flights.summary$rss))+
+  geom_line()+
+  geom_point(x=which.min(flights.summary$rss),
+             y=min(flights.summary$rss),aes(color="red"),
+             show.legend = FALSE)+
+  xlab("# Variables")+
+  ylab("RSS")+
+  theme_bw()
+
+plot_R_sq<-ggplot(data = data.frame(flights.summary$rsq),
+                  aes(x=num_variables,y=flights.summary.rsq))+
+  geom_line()+
+  geom_point(x=which.max(flights.summary$rsq),
+             y=max(flights.summary$rsq),aes(color="red"),
+             show.legend = FALSE)+
+  xlab("# Variables")+
+  ylab("R-sq")+
+  theme_bw()
+
+plot_BIC<-ggplot(data = data.frame(flights.summary$bic),
+                 aes(x=num_variables,y=flights.summary.bic))+
+  geom_line()+
+  geom_point(x=which.min(flights.summary$bic),
+             y=min(flights.summary$bic),aes(color="red"),
+             show.legend = FALSE)+
+  xlab("# Variables")+
+  ylab("BIC")+
+  theme_bw()
+
+plot_AIC<-ggplot(data = data.frame(flights.summary$cp),
+                 aes(x=num_variables,y=flights.summary.cp))+
+  geom_line()+
+  geom_point(x=which.min(flights.summary$cp),
+             y=min(flights.summary$cp),aes(color="red"),
+             show.legend = FALSE)+
+  xlab("# Variables")+
+  ylab("AIC")+
+  theme_bw()
+
+
+grid.arrange(plot_RSS, plot_R_sq,plot_AIC,plot_BIC, ncol=2,nrow=2)
+
+
+# Using the lasso now to do variable selection
+
+xs<-model.matrix(ArrDelay ~.,ArrDelayData)[,-1]
+y<-ArrDelayData$ArrDelay
+
+#alpha=1 is a lasso penalty!
+flights.lasso<-glmnet(xs,y,alpha=1)
+coef(flights.lasso,s=0.1) # can change this lambda value
+
+plot(flights.lasso, label = TRUE)
+
+# Doing cross-validation
+
+cv.out=cv.glmnet(xs,y,alpha=1)
+plot(cv.out)
+
+# Check without Standardizing x variables to have unit variance
+
+flights.lasso.st<-glmnet(xs,y,alpha=1, standardize = FALSE)
+plot(flights.lasso.st, label = TRUE) # without standardization, better to standardize though
+
+
+
+
+```
+
+
+```{r}
+# Answering question 3
+bestlam.1se <- cv.out$lambda.1se
+lasso.coef=as.matrix(predict(flights.lasso,type="coefficients",s=bestlam.1se))
+
+# Predictions for testing data
+
+testing.data.pit = testing.data.pit[,c(2, 3, 6, 10, 13, 15, 20, 44, 46,
+                                       47, 48, 49)]
+head(testing.data.pit)
+
+lasso.coef=predict(cv.out,type="coefficients",s=bestlam.1se)[1:20,]
+lasso.coef[lasso.coef != 0]
+
+xs.test<-model.matrix(ArrDelay ~ .,testing.data.pit)[,-1]
+
+predicted.vals <- predict(flights.lasso, newx = xs.test, s = bestlam.1se)
+y.vals <- testing.data.pit[,"ArrDelay"]
+mean.sse <- mean(sum(predicted.vals - y.vals)^2) # 5935009 (quite big)
+
+
+```
+
+
+```{r}
+# Using LDA to classify whether a particular flight will be 15 mins late or not (can also be done for 30 mins delay)
+
+classification.data.flights <- training.data.pit[,c(2, 3, 6, 13, 16, 44, 46, 47, 48, 49)] 
+# classification.test.data.flights <- testing.data.pit[,c(-4,-6)]
+
+# We ran the LDA command and saw a warning "Variables are collinear". So decided to run ggpairs on it and we had to trim down the variable AirTime because it had a high collinearity with another variable.
+
+# ggpairs(classification.data.flights)
+
+flight.delay.15.lda <- lda(ArrDel15  ~ ., data = classification.data.flights)
+plot(flight.delay.15.lda, col = as.numeric(classification.data.flights$ArrDel15)) # what does this plot tell us. Iris dataset wala homework 4.
+
+confusion.lda <- table(predict(flight.delay.15.lda)$class,
+                       classification.data.flights$ArrDel15)
+confusion.lda
+
+# Mis-classification rate
+1 - sum(diag(confusion.lda)) / sum(confusion.lda)
+
+
+```
+
+```{r}
+# Random forests
+classification.data.flights.train = classification.data.flights[1:5000,] # comment this line for final analysis. Was taking too much time to run with the original dataset.
+classification.data.flights.test = classification.data.flights[6000:7000,] #comment this line too. Used this for testing
+
+flights.rf <- randomForest(ArrDel15 ~ .,
+                           data = classification.data.flights.train)
+
+var.imp <- varImpPlot(flights.rf) # To find the most important variables
+most.imp.vars <- rownames(var.imp)[order(var.imp, decreasing = TRUE)]
+
+rf.test.prob <- predict(flights.rf, newdata = classification.data.flights.test, type = "response")
+rf.test.prob.c = ifelse(rf.test.prob > 0.5, 1, 0)
+
+table(pred=rf.test.prob.c,actual=classification.data.flights.test$ArrDel15)
+
+roc.rf <- roc(classification.data.flights.test$ArrDel15, rf.test.prob)
+# Can prune trees and check accuracy as well
+
+
+
+```
+
+```{r}
+# Boosted trees and ROC curves
+classification.data.flights.train$Carrier = as.factor(classification.data.flights.train$Carrier)
+flights.boost=gbm(ArrDel15 ~ ., data = classification.data.flights.train, distribution = "bernoulli", shrinkage = 0.05,
+                  n.trees=20000, interaction.depth=4, cv.folds = 5)
+
+best.ntrees = gbm.perf(flights.boost, method = "cv")
+
+pred.boost = predict(flights.boost, newdata=classification.data.flights.test, n.trees=best.ntrees, type="response")
+roc.boost <- roc(classification.data.flights.test$ArrDel15, pred.boost) 
+plot(roc.boost, col = "red")
+plot(roc.rf, col = "blue", add = TRUE)
+
+
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+  
+  ```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+  
+  ```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
